@@ -25,8 +25,7 @@ exports.handler = async function (event) {
           <tr><td style="padding:6px;border:1px solid #ddd"><strong>Stope 1</strong></td><td style="padding:6px;border:1px solid #ddd">${report.stope_1 || "—"}</td></tr>
           <tr><td style="padding:6px;border:1px solid #ddd"><strong>Pour Time</strong></td><td style="padding:6px;border:1px solid #ddd">${report.started_pouring || "—"} – ${report.finished_pouring || "—"}</td></tr>
         </table>
-        <p><strong>Comments:</strong><br>${String(report.comments || "None").replace(/
-/g, "<br>")}</p>
+${String(report.comments || "None").replace(/\n/g, "<br>")}</p>
         <p>The PDF copy is attached.</p>
       </div>`;
 
