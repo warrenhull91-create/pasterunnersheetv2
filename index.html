@@ -384,9 +384,9 @@ html,body { height:100%; background:var(--off-white); font-family:var(--font-bod
     <!-- ── SUBMIT SHIFT ── -->
     <div class="submit-block" id="submit-block">
       <h3>📤 Submit Shift Report</h3>
-      <p>This will generate a PDF of the completed sheet and email it to the Doherty Corp team.</p>
+      <p>This will generate a PDF, save it to Google Drive, and email Warren and Luke a link.</p>
       <div class="submit-actions">
-        <button class="btn btn-success" id="btn-submit" onclick="submitShift()">✉️ Submit &amp; Email PDF</button>
+        <button class="btn btn-success" id="btn-submit" onclick="submitShift()">📤 Submit &amp; Email Link</button>
         <button class="btn btn-outline" onclick="saveShift()">💾 Save Only</button>
       </div>
       <div class="submit-status" id="submit-status"></div>
@@ -455,27 +455,27 @@ html,body { height:100%; background:var(--off-white); font-family:var(--font-bod
   <div class="scroll-body">
 
     <div class="setup-banner">
-      <strong>✅ Netlify email is built in</strong>
-      This version no longer uses EmailJS. The submit button generates a PDF and sends it to a secure Netlify Function, which uses your hidden <strong>RESEND_API_KEY</strong> environment variable.
+      <strong>✅ Google Drive link setup is built in</strong>
+      This version no longer uses EmailJS, Resend, or Netlify Functions. The submit button generates a PDF, sends it to your Google Apps Script, saves it in Google Drive, then emails Warren and Luke a link to the PDF.
       <ol class="setup-steps">
-        <li>Make sure <strong>RESEND_API_KEY</strong> is saved as a secret environment variable in Netlify.</li>
-        <li>Deploy this full folder to Netlify, not just the HTML file.</li>
-        <li>Tap <strong>Send Test Email</strong> below after deployment.</li>
+        <li>PDFs are saved into your <strong>Paste Runner Reports</strong> Google Drive folder.</li>
+        <li>Emails are sent by <strong>skopastedocs@gmail.com</strong>.</li>
+        <li>Tap <strong>Send Test</strong> below after Netlify finishes deploying.</li>
       </ol>
     </div>
 
     <div class="settings-section">
-      <div class="settings-section-title">Email Test</div>
+      <div class="settings-section-title">Google Drive Test</div>
       <div class="settings-row">
         <label>Recipients</label>
-        <div class="settings-hint">Emails are controlled inside <strong>netlify/functions/send-pdf.js</strong>. For testing, this is currently set to send to Warren only.</div>
+        <div class="settings-hint">Links are emailed to <strong>warren@dohertycorp.com.au</strong> and <strong>luke@dohertycorp.com.au</strong>. The PDF is stored in Google Drive.</div>
       </div>
       <div class="settings-save-bar">
-        <button class="btn btn-outline" onclick="testEmail()">Send Test Email</button>
+        <button class="btn btn-outline" onclick="testEmail()">Send Test</button>
       </div>
     </div>
 
-    <div style="text-align:center;color:var(--dark-grey);font-size:11px;padding:10px 0 20px">PDF email is handled securely by Netlify.</div>
+    <div style="text-align:center;color:var(--dark-grey);font-size:11px;padding:10px 0 20px">PDF upload and email links are handled by Google Apps Script.</div>
   </div>
 </div>
 
@@ -842,36 +842,49 @@ function blobToBase64(blob){
 }
 
 // ═══════════════════════════════════════════════════
-//  EMAIL SENDING — NETLIFY FUNCTION
+//  GOOGLE DRIVE UPLOAD + EMAIL LINK — GOOGLE APPS SCRIPT
 // ═══════════════════════════════════════════════════
+const GOOGLE_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxmzqwRqPc-aVx7X3_61S-hNQiRtx0dEXvr56aF92Joev6iF7nWEU1oEkANR8IMtpctHw/exec';
+
+function safeFilePart(value){
+  return String(value || '')
+    .trim()
+    .replace(/[^a-z0-9_-]+/gi,'-')
+    .replace(/-+/g,'-')
+    .replace(/^-|-$/g,'') || 'unknown';
+}
+
 async function sendEmail(data,pdfBlob,isTest){
-  const pdfBase64=await blobToBase64(pdfBlob);
-  const filename=`PasteRunner_${data.date||'unknown'}_${data.shift||'shift'}.pdf`;
-  const stope1=(data.stopes&&data.stopes[0]&&data.stopes[0].id)||'—';
-  const response=await fetch('/.netlify/functions/send-pdf',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      pdfBase64,
-      filename,
-      isTest:!!isTest,
-      report:{
-        shift_date:data.date||'—',
-        shift_type:data.shift||'—',
-        operator:data.name||'—',
-        shift_boss:data.shift_boss||'—',
-        plant_operator:data.plant_operator||'—',
-        stope_1:stope1,
-        started_pouring:data.started_pouring||'—',
-        finished_pouring:data.finished_pouring||'—',
-        comments:data.comments||'None'
-      }
-    })
+  const pdfBase64 = await blobToBase64(pdfBlob);
+  const filename = `PasteRunner_${safeFilePart(data.date)}_${safeFilePart(data.shift)}_${safeFilePart(data.name)}.pdf`;
+  const stope1 = (data.stopes && data.stopes[0] && data.stopes[0].id) || '—';
+
+  const payload = {
+    pdfBase64,
+    filename,
+    isTest: !!isTest,
+    report: {
+      shift_date: data.date || '—',
+      shift_type: data.shift || '—',
+      operator: data.name || '—',
+      shift_boss: data.shift_boss || '—',
+      plant_operator: data.plant_operator || '—',
+      stope_1: stope1,
+      started_pouring: data.started_pouring || '—',
+      finished_pouring: data.finished_pouring || '—',
+      comments: data.comments || 'None'
+    }
+  };
+
+  // Google Apps Script does not return browser-readable CORS headers.
+  // mode:'no-cors' still sends the PDF to Google; the app confirms once the request has been submitted.
+  await fetch(GOOGLE_APPS_SCRIPT_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
   });
-  const result=await response.json().catch(()=>({error:'No response from email function'}));
-  if(!response.ok || !result.success){
-    throw new Error(result.error || result.message || 'Email function failed');
-  }
+
   return true;
 }
 
@@ -892,8 +905,8 @@ async function submitShift(){
   try{ pdfBlob=await generatePDFBlob(data); }
   catch(e){ hideLoading();showSubmitStatus('error','PDF generation failed: '+e.message);return; }
 
-  showLoading('Sending emails…');
-  showSubmitStatus('sending','Sending to warren@dohertycorp.com.au and luke@dohertycorp.com.au…');
+  showLoading('Uploading PDF to Google Drive…');
+  showSubmitStatus('sending','Uploading PDF to Google Drive and emailing the link to Warren and Luke…');
 
   try{
     await sendEmail(data,pdfBlob,false);
@@ -901,24 +914,24 @@ async function submitShift(){
     const saved=await dbGet(typeof editingId==='number'?editingId:savedId);
     if(saved){saved.submitted=true;await dbPut(saved);}
     hideLoading();
-    showSubmitStatus('success','✓ Emails sent to warren@dohertycorp.com.au and luke@dohertycorp.com.au');
-    showToast('Shift submitted ✓');
+    showSubmitStatus('success','✓ PDF sent to Google Drive. Link email submitted to Warren and Luke.');
+    showToast('Shift submitted to Google Drive ✓');
     document.getElementById('btn-submit').textContent='✓ Submitted';
     document.getElementById('btn-submit').disabled=true;
   }catch(e){
     hideLoading();
-    showSubmitStatus('error','Email failed: '+e.message+'. Check Netlify Function logs and RESEND_API_KEY.');
+    showSubmitStatus('error','Submit failed: '+e.message+'. Check your Google Apps Script deployment and permissions.');
   }
 }
 
 async function testEmail(){
-  showLoading('Sending test email…');
+  showLoading('Sending test to Google Drive…');
   const fakeData={date:new Date().toISOString().split('T')[0],shift:'D/S',name:'Test User',shift_boss:'Test Boss',plant_operator:'Test Op',stopes:[{id:'TEST-01'}],started_pouring:'07:00',finished_pouring:'09:00',comments:'This is a test.',saved_at:Date.now()};
   let blob;
   try{blob=await generatePDFBlob(fakeData);}catch(e){hideLoading();showToast('PDF error: '+e.message);return;}
   try{
     await sendEmail(fakeData,blob,true);
-    hideLoading();showToast('Test email sent ✓ — check your inbox');
+    hideLoading();showToast('Test submitted ✓ — check Google Drive and inbox');
   }catch(e){
     hideLoading();showToast('Test failed: '+e.message);
   }
