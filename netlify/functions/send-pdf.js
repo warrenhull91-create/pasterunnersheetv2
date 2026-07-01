@@ -43,7 +43,10 @@ exports.handler = async function (event) {
       },
       body: JSON.stringify({
         from: "Paste Runner <onboarding@resend.dev>",
-        to: ["warren.hull.91@gmail.com"],
+        to: [
+          "warren@dohertycorp.com.au",
+          "luke@dohertycorp.com.au"
+        ],
         subject,
         html,
         attachments: [
