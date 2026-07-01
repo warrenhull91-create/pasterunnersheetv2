@@ -818,17 +818,47 @@ function buildPDFHtml(data){
 }
 
 async function generatePDFBlob(data){
-  const tpl=document.getElementById('pdf-template');
-  tpl.innerHTML=buildPDFHtml(data);
-  const opt={
-    margin:[10,10,10,10],
-    filename:`PasteRunner_${data.date||'unknown'}_${data.shift||'shift'}.pdf`,
-    image:{type:'jpeg',quality:0.95},
-    html2canvas:{scale:2,useCORS:true,logging:false},
-    jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
+  const tpl = document.getElementById('pdf-template');
+
+  tpl.innerHTML = buildPDFHtml(data);
+
+  tpl.style.display = 'block';
+  tpl.style.position = 'absolute';
+  tpl.style.left = '0';
+  tpl.style.top = '0';
+  tpl.style.width = '794px';
+  tpl.style.background = '#ffffff';
+  tpl.style.color = '#111';
+  tpl.style.zIndex = '-1';
+  tpl.style.opacity = '1';
+
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  const opt = {
+    margin: [10,10,10,10],
+    filename: `PasteRunner_${data.date || 'unknown'}_${data.shift || 'shift'}.pdf`,
+    image: { type: 'jpeg', quality: 0.95 },
+    html2canvas: {
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      backgroundColor: '#ffffff'
+    },
+    jsPDF: {
+      unit: 'mm',
+      format: 'a4',
+      orientation: 'portrait'
+    }
   };
-  const blob=await html2pdf().set(opt).from(tpl).outputPdf('blob');
-  tpl.innerHTML='';
+
+  const blob = await html2pdf()
+    .set(opt)
+    .from(tpl)
+    .outputPdf('blob');
+
+  tpl.innerHTML = '';
+  tpl.style.display = 'none';
+
   return blob;
 }
 
