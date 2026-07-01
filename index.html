@@ -818,18 +818,169 @@ function buildPDFHtml(data){
 }
 
 async function generatePDFBlob(data){
-  const tpl=document.getElementById('pdf-template');
-  tpl.innerHTML=buildPDFHtml(data);
-  const opt={
-    margin:[10,10,10,10],
-    filename:`PasteRunner_${data.date||'unknown'}_${data.shift||'shift'}.pdf`,
-    image:{type:'jpeg',quality:0.95},
-    html2canvas:{scale:2,useCORS:true,logging:false},
-    jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}
+  // Text-based PDF generator. This avoids blank PDFs caused by html2canvas/html2pdf
+  // trying to screenshot hidden/off-screen HTML on iPad/browser.
+  const jsPDFClass =
+    (window.jspdf && window.jspdf.jsPDF) ||
+    window.jsPDF ||
+    (window.html2pdf && window.html2pdf.jsPDF);
+
+  if (!jsPDFClass) {
+    throw new Error("PDF library not loaded. Refresh the page and try again.");
+  }
+
+  const doc = new jsPDFClass({
+    unit: "mm",
+    format: "a4",
+    orientation: "portrait"
+  });
+
+  const s = data || {};
+  const pageWidth = 210;
+  const pageHeight = 297;
+  const margin = 12;
+  let y = 14;
+
+  function addPageIfNeeded(extra = 8) {
+    if (y + extra > pageHeight - 14) {
+      doc.addPage();
+      y = 14;
+    }
+  }
+
+  function line(label, value) {
+    addPageIfNeeded(7);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(String(label || ""), margin, y);
+    doc.setFont("helvetica", "normal");
+    const text = String(value || "—");
+    const wrapped = doc.splitTextToSize(text, pageWidth - margin * 2 - 48);
+    doc.text(wrapped, margin + 48, y);
+    y += Math.max(6, wrapped.length * 5);
+  }
+
+  function section(title) {
+    addPageIfNeeded(10);
+    y += 2;
+    doc.setFillColor(17, 17, 17);
+    doc.rect(margin, y, pageWidth - margin * 2, 7, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.text(String(title || "").toUpperCase(), margin + 2, y + 5);
+    doc.setTextColor(17, 17, 17);
+    y += 11;
+  }
+
+  function tableRow(cols, widths) {
+    addPageIfNeeded(8);
+    let x = margin;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    cols.forEach((c, i) => {
+      const w = widths[i];
+      doc.rect(x, y - 4, w, 7);
+      const txt = doc.splitTextToSize(String(c || "—"), w - 2);
+      doc.text(txt.slice(0, 1), x + 1, y);
+      x += w;
+    });
+    y += 7;
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text("DOHERTY CORP", margin, y);
+  y += 7;
+  doc.setFontSize(13);
+  doc.text("PASTE RUNNER SHIFT SHEET", margin, y);
+  y += 8;
+  doc.setDrawColor(17, 17, 17);
+  doc.line(margin, y, pageWidth - margin, y);
+  y += 6;
+
+  section("Shift Details");
+  line("Date", s.date || s.shift_date);
+  line("Shift", s.shift || s.shift_type);
+  line("Paste Runner", s.runner || s.operator || s.paste_runner);
+  line("U/G Operator", s.ug_operator);
+  line("Shift Boss", s.shift_boss);
+  line("Mine", s.mine);
+  line("Location", s.location);
+  line("Started Pouring", s.started_pouring);
+  line("Finished Pouring", s.finished_pouring);
+  line("Hot Seating", s.hot_seating ? "YES" : "No");
+
+  section("Stope Details");
+  tableRow(["Field", "Stope 1", "Stope 2", "Stope 3"], [42, 45, 45, 45]);
+  const stopeFields = [
+    ["id", "Stope ID"],
+    ["status", "Status"],
+    ["fill_level", "Level of Fill Point"],
+    ["total_m3", "Total m³"],
+    ["plug_m3", "Plug m³"],
+    ["poured_m3", "Poured m³"]
+  ];
+  stopeFields.forEach(([key, label]) => {
+    tableRow([
+      label,
+      s.stopes && s.stopes[0] ? s.stopes[0][key] : "—",
+      s.stopes && s.stopes[1] ? s.stopes[1][key] : "—",
+      s.stopes && s.stopes[2] ? s.stopes[2][key] : "—"
+    ], [42, 45, 45, 45]);
+  });
+
+  section("Checklist");
+  const tickText = state => {
+    if (state === "ok") return "OK";
+    if (state === "warn") return "Caution";
+    if (state === "bad") return "Fail";
+    return "—";
   };
-  const blob=await html2pdf().set(opt).from(tpl).outputPdf('blob');
-  tpl.innerHTML='';
-  return blob;
+
+  const ckMap = {};
+  if (Array.isArray(s.checklist)) {
+    s.checklist.forEach(c => {
+      ckMap[`${c.row}_${c.col}`] = c.state;
+    });
+  }
+
+  tableRow(["Item", "Stope 1", "Stope 2", "Stope 3"], [87, 30, 30, 30]);
+  if (Array.isArray(CL_ITEMS)) {
+    CL_ITEMS.forEach((item, r) => {
+      tableRow([
+        item,
+        tickText(ckMap[`${r}_0`]),
+        tickText(ckMap[`${r}_1`]),
+        tickText(ckMap[`${r}_2`])
+      ], [87, 30, 30, 30]);
+    });
+  }
+
+  section("Checklist Comments");
+  line("Comments", s.checklist_comments || "—");
+
+  section("Level Tracker");
+  if (Array.isArray(s.levels) && s.levels.length) {
+    s.levels.forEach(row => {
+      tableRow(row, [22, 22, 22, 22, 22, 22, 22, 23]);
+    });
+  } else {
+    line("Levels", "—");
+  }
+
+  section("Comments / Downtime / Handover Notes");
+  line("Comments", s.comments || "—");
+
+  section("Sign Off");
+  line("Operator Name", s.sign_name || s.operator || "—");
+  line("Signature", s.sign_sig || "—");
+
+  doc.setFontSize(8);
+  doc.setTextColor(120, 120, 120);
+  doc.text(`Generated ${new Date().toLocaleString()}`, margin, pageHeight - 8);
+
+  return doc.output("blob");
 }
 
 function blobToBase64(blob){
@@ -854,30 +1005,14 @@ function safeFilePart(value){
     .replace(/^-|-$/g,'') || 'unknown';
 }
 
-async function sendEmail(data,pdfBlob,isTest){
-  const pdfBase64 = await blobToBase64(pdfBlob);
-  const filename = `PasteRunner_${safeFilePart(data.date)}_${safeFilePart(data.shift)}_${safeFilePart(data.name)}.pdf`;
-  const stope1 = (data.stopes && data.stopes[0] && data.stopes[0].id) || '—';
-
+async function sendEmail(data,isTest){
   const payload = {
-    pdfBase64,
-    filename,
     isTest: !!isTest,
-    report: {
-      shift_date: data.date || '—',
-      shift_type: data.shift || '—',
-      operator: data.name || '—',
-      shift_boss: data.shift_boss || '—',
-      plant_operator: data.plant_operator || '—',
-      stope_1: stope1,
-      started_pouring: data.started_pouring || '—',
-      finished_pouring: data.finished_pouring || '—',
-      comments: data.comments || 'None'
-    }
+    report: data
   };
 
   // Google Apps Script does not return browser-readable CORS headers.
-  // mode:'no-cors' still sends the PDF to Google; the app confirms once the request has been submitted.
+  // mode:'no-cors' still sends the form data to Google; Apps Script creates the PDF.
   await fetch(GOOGLE_APPS_SCRIPT_URL, {
     method: 'POST',
     mode: 'no-cors',
@@ -889,7 +1024,7 @@ async function sendEmail(data,pdfBlob,isTest){
 }
 
 // ═══════════════════════════════════════════════════
-//  SUBMIT SHIFT
+//  SUBMIT SHIFT — GOOGLE CREATES PDF SERVER-SIDE
 // ═══════════════════════════════════════════════════
 async function submitShift(){
   const data=collectForm();
@@ -900,22 +1035,16 @@ async function submitShift(){
   const savedId=await dbPut(data);
   if(editingId===null)editingId=savedId;
 
-  showLoading('Generating PDF…');
-  let pdfBlob;
-  try{ pdfBlob=await generatePDFBlob(data); }
-  catch(e){ hideLoading();showSubmitStatus('error','PDF generation failed: '+e.message);return; }
-
-  showLoading('Uploading PDF to Google Drive…');
-  showSubmitStatus('sending','Uploading PDF to Google Drive and emailing the link to Warren and Luke…');
+  showLoading('Submitting to Google Drive…');
+  showSubmitStatus('sending','Submitting shift sheet. Google will create the PDF, save it to Drive, and email Warren and Luke…');
 
   try{
-    await sendEmail(data,pdfBlob,false);
-    // mark submitted
+    await sendEmail(data,false);
     const saved=await dbGet(typeof editingId==='number'?editingId:savedId);
     if(saved){saved.submitted=true;await dbPut(saved);}
     hideLoading();
-    showSubmitStatus('success','✓ PDF sent to Google Drive. Link email submitted to Warren and Luke.');
-    showToast('Shift submitted to Google Drive ✓');
+    showSubmitStatus('success','✓ Shift sheet submitted. Google Drive PDF and email link are being created.');
+    showToast('Shift submitted ✓');
     document.getElementById('btn-submit').textContent='✓ Submitted';
     document.getElementById('btn-submit').disabled=true;
   }catch(e){
@@ -926,11 +1055,30 @@ async function submitShift(){
 
 async function testEmail(){
   showLoading('Sending test to Google Drive…');
-  const fakeData={date:new Date().toISOString().split('T')[0],shift:'D/S',name:'Test User',shift_boss:'Test Boss',plant_operator:'Test Op',stopes:[{id:'TEST-01'}],started_pouring:'07:00',finished_pouring:'09:00',comments:'This is a test.',saved_at:Date.now()};
-  let blob;
-  try{blob=await generatePDFBlob(fakeData);}catch(e){hideLoading();showToast('PDF error: '+e.message);return;}
+  const fakeData={
+    date:new Date().toISOString().split('T')[0],
+    shift:'D/S',
+    name:'Test User',
+    paste_engineer:'Test Engineer',
+    shift_boss:'Test Boss',
+    plant_operator:'Test Op',
+    safety_focus:'Test safety focus',
+    time_flushed:'06:45',
+    permission_time:'06:55',
+    started_pouring:'07:00',
+    finished_pouring:'09:00',
+    hot_seating:false,
+    stopes:[{id:'TEST-01',status:'Poured',fill_level:'10m',total_m3:'100',plug_m3:'20',poured_m3:'80'},{},{}],
+    checklist:[],
+    levels:[],
+    checklist_comments:'Test checklist comments.',
+    comments:'This is a test submission generated by the Paste Runner app.',
+    sign_name:'Test User',
+    sign_sig:'Test Signature',
+    saved_at:Date.now()
+  };
   try{
-    await sendEmail(fakeData,blob,true);
+    await sendEmail(fakeData,true);
     hideLoading();showToast('Test submitted ✓ — check Google Drive and inbox');
   }catch(e){
     hideLoading();showToast('Test failed: '+e.message);
@@ -1026,7 +1174,7 @@ document.getElementById('btn-edit-shift').addEventListener('click',async()=>{
   restoreForm(s);
   document.getElementById('editing-bar').style.display='flex';
   document.getElementById('btn-submit').disabled=false;
-  document.getElementById('btn-submit').textContent='✉️ Submit & Email PDF';
+  document.getElementById('btn-submit').textContent='📤 Submit & Email Link';
   hideSubmitStatus();
   showView('form');showToast('Editing shift — tap Save or Submit when done');
 });
@@ -1034,14 +1182,11 @@ document.getElementById('btn-edit-shift').addEventListener('click',async()=>{
 document.getElementById('btn-resend').addEventListener('click',async()=>{
   if(!detailId)return;
   const s=await dbGet(detailId);
-  showLoading('Generating PDF…');
-  let blob;
-  try{blob=await generatePDFBlob(s);}catch(e){hideLoading();showToast('PDF error: '+e.message);return;}
-  showLoading('Resending emails…');
+  showLoading('Resending to Google Drive…');
   try{
-    await sendEmail(s,blob,false);
+    await sendEmail(s,false);
     s.submitted=true;await dbPut(s);
-    hideLoading();showToast('Emails resent ✓');
+    hideLoading();showToast('Email link resent ✓');
     document.getElementById('detail-submitted-badge').style.display='inline';
   }catch(e){hideLoading();showToast('Send failed: '+e.message);}
 });
